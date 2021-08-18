@@ -1,0 +1,12 @@
+[session]
+DOCUMENT_ROOT=C:/Users/X/Desktop/phpImport
+
+tlg_user=telegram user id
+tlg_bot=telegram bot token
+
+mysql_host=mysql99.1gb.ru:3306
+mysql_user=root
+mysql_password=
+mysql_database=database
+
+folderPath=folder with *.sql files

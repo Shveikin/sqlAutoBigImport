@@ -14,17 +14,12 @@ function conf($e){
 }
 
 
-
 if (!isset($_SERVER['DOCUMENT_ROOT']) | $_SERVER['DOCUMENT_ROOT']==''){
     $_SERVER['DOCUMENT_ROOT'] = conf('DOCUMENT_ROOT');
 }
 
 define('TLG_ADM_ID', conf('tlg_user'));  
 define('TLG_BOT_TOKEN', conf('tlg_bot'));
-
-
-
-
 
 
 function tlg($messaggio){
@@ -79,7 +74,6 @@ class phpImport {
 
     private $needSaveConfig = 10;
 
-
     private $counts = 0; 
 
     private $mysqli;
@@ -104,7 +98,7 @@ class phpImport {
         $this->filename = $filename;
 
 
-        $this->baseDir = dirname($filename);
+        $this->baseDir = conf('savePath');
 
         if (file_exists($this->baseDir . '/session.json')){
             if (!$empty) $config = json_decode(file_get_contents($this->baseDir . '/session.json'), true);
@@ -241,23 +235,71 @@ class phpImport {
 
         if (isset($this->queris['INSERT']) && count($this->queris['INSERT'])!=0 && $this->eof()==true){
             echo "Файл прочитан полностью а инсерта не набралось";
+            tlg('Не удалось прочитать файл полностью');
             $this->insertTo();
         }
     }
 
-    function insertTo(){
-        $tableName = basename($this->filename, '.sql');
-        if ($this->counts == 0){
-            if ($this->mysqli->query("DROP TABLE `$tableName`")){
+    function getStringBetween($str, $from, $to){
+		$sub = substr($str, strpos($str,$from)+strlen($from),strlen($str));
+		return substr($sub,0,strpos($sub,$to));
+	}
 
-            // if ($this->mysqli->query("TRUNCATE TABLE `$tableName`")){
-                tlg("DROP TABLE `$tableName` -- OK");
-                echo "Табличка очищена\n";
+    
+    function insertTo(){
+        $tableNames = [];
+
+
+        $this->counts += count($this->queris['INSERT']);
+        
+        $insert = "";
+        $tables = [];
+        foreach ($this->queris['INSERT'] as $query) {
+
+            if ($insert==''){
+                $insert = substr($query,0,-1);
             } else {
-                tlg("TRUNCATE TABLE `$tableName` -- no");
-                echo "Табличка не очищена! ($tableName)]\n";
+                $array = explode("VALUES", $query);
+                $tables[$this->getStringBetween($array[0], '`', '`')] = 1;
+
+                $insert .=  ','.substr($array[1], 0, -1) ;
             }
         }
+
+
+
+
+        foreach ($tables as $tableName => $__) {
+            if (!isset($this->config['removeTable']) || !in_array($tableName, $this->config['removeTable'])){
+                if ($this->mysqli->query("DROP TABLE `$tableName`")){
+                    tlg("DROP TABLE `$tableName` -- OK");
+                    echo "Табличка $tableName - удалена \n";
+
+                    if (!isset($this->config['removeTable'])) $this->config['removeTable'] = [];
+                    array_push($this->config['removeTable'], $tableName);
+                }
+            }
+
+            if (!isset($this->config['createTable']) || !in_array($tableName, $this->config['createTable'])){
+                if (isset($this->queris['CREATE']) && count($this->queris['CREATE']) != 0) {
+                    foreach ($this->queris['CREATE'] as $query) {
+                        if ($this->mysqli->query($query)) echo "CREATE OK\n";
+                    }
+
+                    echo "Табличка $tableName - создана \n";
+                    tlg("CREATE TABLE `$tableName` -- OK");
+
+                    if (!isset($this->config['createTable'])) $this->config['createTable'] = [];
+
+                    array_push($this->config['createTable'], $tableName);
+                }
+            }
+        }
+
+
+
+        // $tableName = basename($this->filename, '.sql');
+        
 
         if (!$this->setSET && isset($this->queris['SET']) && count($this->queris['SET'])!=0){
             foreach($this->queris['SET'] as $query){
@@ -266,31 +308,24 @@ class phpImport {
             $this->setSET = true;
         }
 
-        if (!$this->createTable && isset($this->queris['CREATE']) && count($this->queris['CREATE']) != 0) {
-            foreach ($this->queris['CREATE'] as $query) {
-                if ($this->mysqli->query($query)) echo "CREATE OK\n";
-            }
-            $this->createTable = true;
-        }
-
-        $this->counts += count($this->queris['INSERT']);
         
-        $insert = "";
-        foreach ($this->queris['INSERT'] as $query) {
-            if ($insert==''){
-                $insert = substr($query,0,-1);
-            } else {
-                $insert .=  ','.substr(explode("VALUES", $query)[1], 0, -1) ;
-            }
-        }
+
+
+
+
 
         if ($this->mysqli->query($insert)){
-            echo $tableName . ' | ' . $this->counts . " | INSERT OK\n";
+            echo $tableName . ' | ' . $this->counts . " | OK " . stristr($insert, '(', true) . "\n";
         } else array_push($this->bugsInsert, $insert);
 
-        
+
 
         if (count($this->bugsInsert)>$this->dieAfterCountBugs){
+            tlg('Надо наверно табличку очистить');
+            tlg(print_r($this->config, true));
+            tlg(print_r($tables, true));
+            
+
             die('Надо наверно табличку очистить');
         }
         $this->queris['INSERT'] = [];
@@ -324,6 +359,7 @@ $dir = array_filter(scandir($folderPath), function($el){
 foreach($dir as $file){
     if (explode('.', $file)[count(explode('.', $file)) - 1] != 'sql') continue;
     tlg("Use file - $file");
+    echo "Use file - $folderPath$file\n";
     $pimp = new phpImport($folderPath . $file, true);
 
     $pimp->fopen();
